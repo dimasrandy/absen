@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Pengajian</title>
+  <style>
+    body { font-family: sans-serif; padding: 10px; }
+    .menu-btn { padding: 15px; margin: 5px 0; font-size: 16px; width: 100%; background: #007bff; color: white; border: none; border-radius: 5px; }
+    .section { display: none; padding: 15px; border: 1px solid #ccc; margin-top: 10px; border-radius: 5px;}
+    .active { display: block; }
+    table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background-color: #f2f2f2; }
+  </style>
+</head>
+<body>
+  <h2>Menu Admin Masjid</h2>
+  <!-- 4 Tombol Menu Utama -->
+  <button class="menu-btn" onclick="showSection('absen')">1. Absensi Kamera</button>
+  <button class="menu-btn" onclick="showSection('ubah')">2. Ubah Data Anggota</button>
+  <button class="menu-btn" onclick="showSection('tambah')">3. Tambah Anggota (Kamera)</button>
+  <button class="menu-btn" onclick="showSection('rekap')">4. Rekap & Peringkat Absen</button>
+
+  <!-- Halaman 1: Absensi Kamera -->
+  <div id="absen" class="section">
+    <h3>Mode Absensi Berjalan...</h3>
+    <!-- Tempatkan <video> dan script face-api.js dari jawaban saya sebelumnya di sini -->
+    <p><i>Kamera pengenalan wajah aktif di sini...</i></p>
+  </div>
+
+  <!-- Halaman 4: Rekap Absen (Poin 5) -->
+  <div id="rekap" class="section">
+    <h3>Peringkat Kehadiran Anggota</h3>
+    <p>Sortir berdasarkan Tanggal:</p>
+    Dari: <input type="date" id="startDate"><br><br>
+    Sampai: <input type="date" id="endDate"><br><br>
+    <button onclick="loadRekap()" style="padding:10px; background:#28a745; color:white; border:none;">Tampilkan Data</button>
+    
+    <div id="hasilRekap" style="margin-top: 20px;"></div>
+  </div>
+
+  <script>
+    const SCRIPT_URL = 'MASUKKAN_URL_WEB_APP_ANDA_DISINI';
+
+    // Logika pindah halaman menu
+    function showSection(id) {
+      document.querySelectorAll('.section').forEach(el => el.classList.remove('active'));
+      document.getElementById(id).classList.add('active');
+    }
+
+    // Logika Poin 5: Tarik data, sortir tanggal, dan buat peringkat
+    async function loadRekap() {
+      document.getElementById('hasilRekap').innerHTML = '<i>Sedang memuat data dari Spreadsheet...</i>';
+      
+      const startInput = document.getElementById('startDate').value;
+      const endInput = document.getElementById('endDate').value;
+      const start = new Date(startInput);
+      const end = new Date(endInput);
+      
+      const res = await fetch(SCRIPT_URL + '?action=getRekap');
+      const data = await res.json();
+      
+      const records = data.slice(1); // Lewati baris pertama (Header)
+      let rekap = {}; 
+      
+      // Hitung kehadiran dan kumpulkan alasan ijin
+      records.forEach(row => {
+        const tglStr = row[0].split('/'); // Format dari GAS: DD/MM/YYYY
+        const tglRow = new Date(tglStr[2], tglStr[1] - 1, tglStr[0]); 
+        
+        if (tglRow >= start && tglRow <= end) {
+          const id = row[2];
+          const nama = row[3];
+          const status = row[4];
+          const alasan = row[5];
+          
+          if (!rekap[id]) rekap[id] = { nama: nama, hadir: 0, ijin: 0, catatanIjin: [] };
+          
+          if (status === 'Hadir') rekap[id].hadir++;
+          if (status === 'Ijin') {
+            rekap[id].ijin++;
+            rekap[id].catatanIjin.push(`${row[0]}: ${alasan}`); // Simpan tanggal & alasan ijin
+          }
+        }
+      });
+      
+      // Ubah Object ke Array lalu SORTIR dari yang paling jarang hadir (hadir terkecil)
+      let sortedRekap = Object.values(rekap).sort((a, b) => a.hadir - b.hadir);
+      
+      // Render ke Tabel
+      let html = `<table>
+                    <tr>
+                      <th>Peringkat (Jarang Hadir)</th>
+                      <th>Nama</th>
+                      <th>Total Hadir</th>
+                      <th>Total Ijin</th>
+                      <th>Alasan Ijin</th>
+                    </tr>`;
+                    
+      sortedRekap.forEach((item, index) => {
+        html += `<tr>
+          <td>#${index + 1}</td>
+          <td><b>${item.nama}</b></td>
+          <td>${item.hadir} Hari</td>
+          <td>${item.ijin} Hari</td>
+          <td style="font-size:12px;">${item.catatanIjin.join('<br>')}</td>
+        </tr>`;
+      });
+      html += `</table>`;
+      
+      document.getElementById('hasilRekap').innerHTML = html;
+    }
+  </script>
+</body>
+</html>
