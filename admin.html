@@ -3,35 +3,56 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; script-src * 'unsafe-inline' 'unsafe-eval'; connect-src * 'unsafe-inline'; img-src * data: blob: 'unsafe-inline'; frame-src *;">
+
   <title>Admin Pengajian</title>
   
-  <!-- MEMUAT FACE-API SECARA LOKAL DARI REPO ANDA SENDIRI -->
+  <!-- Memuat face-api.js secara lokal -->
   <script src="face-api.min.js"></script>
 
   <style>
-    body { font-family: sans-serif; padding: 10px; }
+    body { font-family: sans-serif; padding: 10px; max-width: 800px; margin: auto; }
     .menu-btn { padding: 15px; margin: 5px 0; font-size: 16px; width: 100%; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; }
     .menu-btn:hover { background: #0056b3; }
-    .section { display: none; padding: 15px; border: 1px solid #ccc; margin-top: 10px; border-radius: 5px;}
+    .section { display: none; padding: 15px; border: 1px solid #ccc; margin-top: 10px; border-radius: 5px; background: #fff;}
     .active { display: block; }
     table { width: 100%; border-collapse: collapse; margin-top: 15px; }
     th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
     th { background-color: #f2f2f2; }
-    #video-container {
+    .video-container {
       position: relative;
       display: inline-block;
       margin-top: 10px;
     }
-    video {
+    video, canvas {
       border: 3px solid #28a745;
       border-radius: 8px;
       background-color: #000;
       display: block;
     }
+    input, button.action-btn {
+      padding: 10px;
+      margin: 5px 0 15px 0;
+      width: 100%;
+      font-size: 16px;
+      box-sizing: border-box;
+    }
+    button.action-btn {
+      background-color: #28a745;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    button.action-btn:hover {
+      background-color: #218838;
+    }
   </style>
 </head>
 <body>
   <h2>Menu Admin Masjid</h2>
+  
   <!-- 4 Tombol Menu Utama -->
   <button class="menu-btn" onclick="showSection('absen')">1. Absensi Kamera</button>
   <button class="menu-btn" onclick="showSection('ubah')">2. Ubah Data Anggota</button>
@@ -41,9 +62,9 @@
   <!-- Halaman 1: Absensi Kamera -->
   <div id="absen" class="section active">
     <h3>Mode Absensi Berjalan...</h3>
-    <p id="model-status"><i>Memeriksa sistem...</i></p>
-    <div id="video-container">
-      <video id="video" width="640" height="480" autoplay muted></video>
+    <p id="model-status"><i>Memuat model AI pengenalan wajah...</i></p>
+    <div class="video-container">
+      <video id="video-absen" width="640" height="480" autoplay muted></video>
     </div>
   </div>
 
@@ -53,10 +74,22 @@
     <p><i>Fitur sedang disiapkan...</i></p>
   </div>
 
-  <!-- Halaman 3: Tambah Anggota -->
+  <!-- Halaman 3: Tambah Anggota (Kamera) -->
   <div id="tambah" class="section">
-    <h3>Tambah Anggota (Kamera)</h3>
-    <p><i>Fitur sedang disiapkan...</i></p>
+    <h3>Tambah Anggota Baru dengan Pemindaian Wajah</h3>
+    <label>ID Anggota:</label>
+    <input type="text" id="regId" placeholder="Contoh: 001">
+    
+    <label>Nama Lengkap:</label>
+    <input type="text" id="regName" placeholder="Masukkan nama lengkap...">
+
+    <p id="reg-status"><i>Posisikan wajah Anda di depan kamera lalu klik tombol di bawah.</i></p>
+    
+    <div class="video-container">
+      <video id="video-reg" width="640" height="480" autoplay muted></video>
+    </div>
+    
+    <button class="action-btn" onclick="daftarAnggota()">Ambil Wajah & Simpan Data</button>
   </div>
 
   <!-- Halaman 4: Rekap Absen -->
@@ -65,39 +98,32 @@
     <p>Sortir berdasarkan Tanggal:</p>
     Dari: <input type="date" id="startDate"><br><br>
     Sampai: <input type="date" id="endDate"><br><br>
-    <button onclick="loadRekap()" style="padding:10px; background:#28a745; color:white; border:none; cursor:pointer;">Tampilkan Data</button>
+    <button onclick="loadRekap()" style="padding:10px; background:#28a745; color:white; border:none; cursor:pointer; width:100%;">Tampilkan Data</button>
     
     <div id="hasilRekap" style="margin-top: 20px;"></div>
   </div>
 
   <script>
     const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwBMjMP0fXaejwfplELxG4d0bNxlpBj_mQlwdDrOlMNTNetarn1Wd0Z6mM5OaEVJ0AQ/exec';
-    const video = document.getElementById('video');
+
+    const videoAbsen = document.getElementById('video-absen');
+    const videoReg = document.getElementById('video-reg');
     let isModelLoaded = false;
+    let currentStream = null;
 
+    // 1. Memuat Model AI saat pertama kali dibuka
     async function loadModels() {
-      const status = document.getElementById('model-status');
       try {
-        // Cek apakah face-api berhasil dibaca
-        if (typeof faceapi === 'undefined') {
-          throw new Error('File face-api.min.js lokal gagal dimuat.');
-        }
-
-        status.innerHTML = '<i>Memuat model AI (SSD Mobilenet)...</i>';
         await faceapi.nets.ssdMobilenetv1.loadFromUri('./models');
-
-        status.innerHTML = '<i>Memuat model AI (Face Landmark)...</i>';
         await faceapi.nets.faceLandmark68Net.loadFromUri('./models');
-
-        status.innerHTML = '<i>Memuat model AI (Face Recognition)...</i>';
         await faceapi.nets.faceRecognitionNet.loadFromUri('./models');
         
         isModelLoaded = true;
-        status.innerHTML = '<b style="color: green;">Model AI berhasil dimuat! Mengaktifkan kamera...</b>';
-        startCamera();
+        document.getElementById('model-status').innerHTML = '<b style="color: green;">Model AI berhasil dimuat. Mengaktifkan kamera...</b>';
+        startCamera(videoAbsen);
       } catch (error) {
-        console.error("GAGAL MEMUAT MODEL:", error);
-        status.innerHTML = '<b style="color: red;">Gagal memuat model AI.<br><br>' + error.message + '</b>';
+        console.error("Gagal memuat model AI:", error);
+        document.getElementById('model-status').innerHTML = '<b style="color: red;">Gagal memuat model AI. Periksa folder ./models di repositori Anda.</b>';
       }
     }
 
@@ -105,6 +131,7 @@
       loadModels();
     });
 
+    // 2. Navigasi Antar Menu
     function showSection(id) {
       document.querySelectorAll('.section').forEach(el => el.classList.remove('active'));
       const targetSection = document.getElementById(id);
@@ -112,15 +139,21 @@
         targetSection.classList.add('active');
       }
 
-      if (id === 'absen' && isModelLoaded && !video.srcObject) {
-        startCamera();
+      // Matikan stream lama jika ada, lalu aktifkan kamera sesuai tab yang dibuka
+      stopCameraStream();
+
+      if (id === 'absen' && isModelLoaded) {
+        startCamera(videoAbsen);
+      } else if (id === 'tambah' && isModelLoaded) {
+        startCamera(videoReg);
       }
     }
 
-    function startCamera() {
+    function startCamera(videoElement) {
       navigator.mediaDevices.getUserMedia({ video: {} })
         .then(stream => {
-          video.srcObject = stream;
+          currentStream = stream;
+          videoElement.srcObject = stream;
         })
         .catch(err => {
           console.error("Kamera tidak dapat diakses:", err);
@@ -128,25 +161,87 @@
         });
     }
 
-    video.addEventListener('play', () => {
-      const canvas = faceapi.createCanvasFromMedia(video);
-      document.getElementById('video-container').append(canvas);
+    function stopCameraStream() {
+      if (currentStream) {
+        currentStream.getTracks().forEach(track => track.stop());
+        currentStream = null;
+      }
+    }
+
+    // 3. Deteksi Wajah Realtime untuk Tab Absensi
+    videoAbsen.addEventListener('play', () => {
+      const canvas = faceapi.createCanvasFromMedia(videoAbsen);
+      videoAbsen.parentElement.append(canvas);
       
-      const displaySize = { width: video.width, height: video.height };
+      const displaySize = { width: videoAbsen.width, height: videoAbsen.height };
       faceapi.matchDimensions(canvas, displaySize);
 
       setInterval(async () => {
-        const detections = await faceapi.detectAllFaces(video, new faceapi.SsdMobilenetv1Options())
+        if (!document.getElementById('absen').classList.contains('active')) return;
+        const detections = await faceapi.detectAllFaces(videoAbsen, new faceapi.SsdMobilenetv1Options())
           .withFaceLandmarks()
           .withFaceDescriptors();
           
         const resizedDetections = faceapi.resizeResults(detections, displaySize);
-        
         canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
         faceapi.draw.drawDetections(canvas, resizedDetections);
       }, 100);
     });
 
+    // 4. Proses Pendaftaran Anggota Baru (Ambil Data Wajah & Kirim ke Spreadsheet)
+    async function daftarAnggota() {
+      const idAnggota = document.getElementById('regId').value.trim();
+      const namaAnggota = document.getElementById('regName').value.trim();
+      const statusText = document.getElementById('reg-status');
+
+      if (!idAnggota || !namaAnggota) {
+        alert('Harap isi ID dan Nama Anggota terlebih dahulu!');
+        return;
+      }
+
+      statusText.innerHTML = '<i>Sedang memindai wajah, mohon diam sejenak...</i>';
+
+      // Deteksi wajah tunggal dari kamera pendaftaran
+      const detection = await faceapi.detectSingleFace(videoReg, new faceapi.SsdMobilenetv1Options())
+        .withFaceLandmarks()
+        .withFaceDescriptor();
+
+      if (!detection) {
+        statusText.innerHTML = '<b style="color: red;">Wajah tidak terdeteksi! Pastikan posisi wajah Anda pas di tengah kamera.</b>';
+        return;
+      }
+
+      // Ubah data descriptor wajah (Float32Array) menjadi Array biasa agar bisa dikirim via JSON
+      const descriptorArray = Array.from(detection.descriptor);
+
+      statusText.innerHTML = '<i>Menyimpan data anggota ke Spreadsheet...</i>';
+
+      // Kirim data ke Google Apps Script (Pastikan Code.gs Anda sudah mendukung aksi tambah anggota)
+      const payload = {
+        action: 'tambahAnggota',
+        id: idAnggota,
+        nama: namaAnggota,
+        descriptor: descriptorArray
+      };
+
+      try {
+        await fetch(SCRIPT_URL, {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        statusText.innerHTML = '<b style="color: green;">Berhasil! Anggota ' + namaAnggota + ' berhasil disimpan.</b>';
+        document.getElementById('regId').value = '';
+        document.getElementById('regName').value = '';
+      } catch (error) {
+        console.error('Error:', error);
+        statusText.innerHTML = '<b style="color: red;">Gagal terhubung ke server Google Sheets.</b>';
+      }
+    }
+
+    // 5. Rekap Absen
     async function loadRekap() {
       document.getElementById('hasilRekap').innerHTML = '<i>Sedang memuat data dari Spreadsheet...</i>';
       
