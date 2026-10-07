@@ -293,9 +293,10 @@
           descriptor: descriptorArray
         };
 
-        // Menggunakan URLSearchParams agar data terkirim dengan mulus ke doPost(e) Apps Script tanpa terblokir CORS
+        // Menggunakan mode: 'no-cors' agar tidak diblokir oleh browser saat mengirim POST ke Apps Script
         await fetch(SCRIPT_URL, {
           method: 'POST',
+          mode: 'no-cors',
           body: JSON.stringify(payload)
         });
 
