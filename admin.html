@@ -3,13 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  
-  <meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; script-src * 'unsafe-inline' 'unsafe-eval'; connect-src * 'unsafe-inline'; img-src * data: blob: 'unsafe-inline'; frame-src *;">
-
   <title>Admin Pengajian</title>
   
-  <!-- MEMUAT FACE-API.JS LANGSUNG DARI CDN RESMI YANG STABIL -->
-  <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+  <!-- MEMUAT FACE-API SECARA LOKAL DARI REPO ANDA SENDIRI -->
+  <script src="face-api.min.js"></script>
 
   <style>
     body { font-family: sans-serif; padding: 10px; }
@@ -44,7 +41,7 @@
   <!-- Halaman 1: Absensi Kamera -->
   <div id="absen" class="section active">
     <h3>Mode Absensi Berjalan...</h3>
-    <p id="model-status"><i>Memuat model AI pengenalan wajah...</i></p>
+    <p id="model-status"><i>Memeriksa sistem...</i></p>
     <div id="video-container">
       <video id="video" width="640" height="480" autoplay muted></video>
     </div>
@@ -75,27 +72,35 @@
 
   <script>
     const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwBMjMP0fXaejwfplELxG4d0bNxlpBj_mQlwdDrOlMNTNetarn1Wd0Z6mM5OaEVJ0AQ/exec';
-
     const video = document.getElementById('video');
     let isModelLoaded = false;
 
-    // Logika Memuat Model AI dari folder 'models' lokal Anda
     async function loadModels() {
+      const status = document.getElementById('model-status');
       try {
+        // Cek apakah face-api berhasil dibaca
+        if (typeof faceapi === 'undefined') {
+          throw new Error('File face-api.min.js lokal gagal dimuat.');
+        }
+
+        status.innerHTML = '<i>Memuat model AI (SSD Mobilenet)...</i>';
         await faceapi.nets.ssdMobilenetv1.loadFromUri('./models');
+
+        status.innerHTML = '<i>Memuat model AI (Face Landmark)...</i>';
         await faceapi.nets.faceLandmark68Net.loadFromUri('./models');
+
+        status.innerHTML = '<i>Memuat model AI (Face Recognition)...</i>';
         await faceapi.nets.faceRecognitionNet.loadFromUri('./models');
         
         isModelLoaded = true;
-        document.getElementById('model-status').innerHTML = '<b style="color: green;">Model AI berhasil dimuat. Mengaktifkan kamera...</b>';
+        status.innerHTML = '<b style="color: green;">Model AI berhasil dimuat! Mengaktifkan kamera...</b>';
         startCamera();
       } catch (error) {
-        console.error("Gagal memuat model AI:", error);
-        document.getElementById('model-status').innerHTML = '<b style="color: red;">Gagal memuat model AI. Periksa folder ./models di repositori Anda.</b>';
+        console.error("GAGAL MEMUAT MODEL:", error);
+        status.innerHTML = '<b style="color: red;">Gagal memuat model AI.<br><br>' + error.message + '</b>';
       }
     }
 
-    // Jalankan pemuatan model saat halaman pertama kali dibuka
     window.addEventListener('DOMContentLoaded', () => {
       loadModels();
     });
