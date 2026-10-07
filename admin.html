@@ -4,13 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   
-  <!-- TAMBAHAN META CSP UNTUK MENGATASI BLOKIR GITHUB PAGES -->
   <meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; script-src * 'unsafe-inline' 'unsafe-eval'; connect-src * 'unsafe-inline'; img-src * data: blob: 'unsafe-inline'; frame-src *;">
 
   <title>Admin Pengajian</title>
   
-  <!-- Memuat face-api.js secara lokal dari folder yang sama -->
-  <script src="face-api.js"></script>
+  <!-- MEMUAT FACE-API.JS LANGSUNG DARI CDN RESMI YANG STABIL -->
+  <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
 
   <style>
     body { font-family: sans-serif; padding: 10px; }
@@ -80,7 +79,7 @@
     const video = document.getElementById('video');
     let isModelLoaded = false;
 
-    // Logika Memuat Model AI dari folder 'models' lokal
+    // Logika Memuat Model AI dari folder 'models' lokal Anda
     async function loadModels() {
       try {
         await faceapi.nets.ssdMobilenetv1.loadFromUri('./models');
@@ -101,7 +100,6 @@
       loadModels();
     });
 
-    // Logika pindah halaman menu yang aman dari error null
     function showSection(id) {
       document.querySelectorAll('.section').forEach(el => el.classList.remove('active'));
       const targetSection = document.getElementById(id);
@@ -109,13 +107,11 @@
         targetSection.classList.add('active');
       }
 
-      // Jika pindah ke tab absen dan model sudah siap, aktifkan kamera
       if (id === 'absen' && isModelLoaded && !video.srcObject) {
         startCamera();
       }
     }
 
-    // Mengaktifkan Kamera
     function startCamera() {
       navigator.mediaDevices.getUserMedia({ video: {} })
         .then(stream => {
@@ -127,7 +123,6 @@
         });
     }
 
-    // Logika Deteksi Wajah saat video berjalan
     video.addEventListener('play', () => {
       const canvas = faceapi.createCanvasFromMedia(video);
       document.getElementById('video-container').append(canvas);
@@ -147,7 +142,6 @@
       }, 100);
     });
 
-    // Logika Tarik data, sortir tanggal, dan buat peringkat
     async function loadRekap() {
       document.getElementById('hasilRekap').innerHTML = '<i>Sedang memuat data dari Spreadsheet...</i>';
       
@@ -159,11 +153,11 @@
       const res = await fetch(SCRIPT_URL + '?action=getRekap');
       const data = await res.json();
       
-      const records = data.slice(1); // Lewati baris pertama (Header)
+      const records = data.slice(1);
       let rekap = {}; 
       
       records.forEach(row => {
-        const tglStr = row[0].split('/'); // Format dari GAS: DD/MM/YYYY
+        const tglStr = row[0].split('/'); 
         const tglRow = new Date(tglStr[2], tglStr[1] - 1, tglStr[0]); 
         
         if (tglRow >= start && tglRow <= end) {
