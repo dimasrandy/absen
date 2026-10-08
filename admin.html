@@ -470,7 +470,7 @@
       lastDetectionTime = now;
 
       try {
-        const detection = await faceapi.detectSingleFace(videoAbsen, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.45 }))
+        const detection = await faceapi.detectSingleFace(videoAbsen, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.65 }))
           .withFaceLandmarks()
           .withFaceDescriptor();
 
