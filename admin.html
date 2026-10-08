@@ -37,6 +37,17 @@
       height: auto;
       border-radius: 8px;
     }
+    #detected-name-banner {
+      margin-top: 15px;
+      padding: 15px 30px;
+      background: rgba(0, 123, 255, 0.9);
+      color: white;
+      font-size: 22px;
+      font-weight: bold;
+      border-radius: 8px;
+      text-align: center;
+      max-width: 90%;
+    }
     .back-btn {
       position: absolute;
       top: 20px;
@@ -48,6 +59,7 @@
       border-radius: 5px;
       cursor: pointer;
       font-size: 16px;
+      z-index: 10000;
     }
 
     .video-container {
@@ -155,7 +167,7 @@
     <div class="video-container" style="margin:0;">
       <video id="video-absen" width="720" height="540" autoplay muted playsinline></video>
     </div>
-    <div id="detected-name-banner" style="margin-top: 15px; padding: 15px 30px; background: rgba(0, 123, 255, 0.9); color: white; font-size: 24px; font-weight: bold; border-radius: 8px; text-align: center;">Menunggu Wajah Terdeteksi...</div>
+    <div id="detected-name-banner">Menunggu Wajah Terdeteksi...</div>
   </div>
 
   <script>
@@ -164,8 +176,11 @@
     const videoAbsen = document.getElementById('video-absen');
     const videoReg = document.getElementById('video-reg');
     let isModelLoaded = false;
-    let currentStream = null;
     let regStream = null;
+    let absenStream = null;
+    let absenInterval = null;
+    let faceMatcher = null;
+    let lastAbsenTime = {};
 
     // Set default tanggal hari ini
     document.getElementById('absensiTanggal').valueAsDate = new Date();
@@ -197,7 +212,7 @@
         targetSection.classList.add('active');
       }
 
-      if (id === 'tambah' && isModelLoaded) {
+      if (id === 'tambah') {
         startRegCamera();
       }
     }
@@ -233,8 +248,8 @@
 
     async function startAbsenCamera() {
       try {
-        if (!currentStream) {
-          currentStream = await navigator.mediaDevices.getUserMedia({
+        if (!absenStream) {
+          absenStream = await navigator.mediaDevices.getUserMedia({
             video: { 
               facingMode: "user",
               width: { ideal: 720 }, 
@@ -243,25 +258,56 @@
             audio: false
           });
         }
-        videoAbsen.srcObject = currentStream;
+        videoAbsen.srcObject = absenStream;
         await videoAbsen.play();
       } catch (err) {
         console.error("Kamera absensi tidak dapat diakses:", err);
-        alert("Izin kamera ditolak.");
+        alert("Izin kamera absensi ditolak.");
       }
     }
 
     function stopAllStreams() {
-      if (currentStream) {
-        currentStream.getTracks().forEach(track => track.stop());
-        currentStream = null;
-      }
       if (regStream) {
         regStream.getTracks().forEach(track => track.stop());
         regStream = null;
       }
+      if (absenStream) {
+        absenStream.getTracks().forEach(track => track.stop());
+        absenStream = null;
+      }
+      if (absenInterval) {
+        clearInterval(absenInterval);
+        absenInterval = null;
+      }
     }
 
+    // Memuat database wajah anggota untuk pencocokan absensi
+    async function loadFaceDatabase() {
+      try {
+        document.getElementById('detected-name-banner').innerText = 'Memuat database anggota...';
+        const res = await fetch(SCRIPT_URL + '?action=getDescriptors');
+        const members = await res.json();
+
+        if (!members || members.length === 0) {
+          document.getElementById('detected-name-banner').innerText = 'Belum ada anggota terdaftar!';
+          return false;
+        }
+
+        const labeledDescriptors = members.map(m => {
+          const floatDesc = new Float32Array(m.descriptor);
+          return new faceapi.LabeledFaceDescriptors(m.id + "|" + m.nama, [floatDesc]);
+        });
+
+        faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.6);
+        return true;
+      } catch (err) {
+        console.error("Gagal memuat database wajah:", err);
+        document.getElementById('detected-name-banner').innerText = 'Gagal memuat database wajah.';
+        return false;
+      }
+    }
+
+    // Mulai Sesi Absensi & Jalankan Loop Pemindaian Otomatis
     async function mulaiSesiAbsen() {
       const tgl = document.getElementById('absensiTanggal').value;
       if (!tgl) {
@@ -273,6 +319,67 @@
       document.getElementById('absen-scanner-view').style.display = 'flex';
 
       await startAbsenCamera();
+      
+      // Muat database wajah dari Spreadsheet
+      const loaded = await loadFaceDatabase();
+      if (!loaded) return;
+
+      document.getElementById('detected-name-banner').innerText = 'Mulai memindai wajah...';
+
+      // Jalankan loop deteksi wajah setiap 1 detik
+      absenInterval = setInterval(async () => {
+        if (document.getElementById('absen-scanner-view').style.display !== 'flex') {
+          clearInterval(absenInterval);
+          return;
+        }
+
+        const detection = await faceapi.detectSingleFace(videoAbsen, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 }))
+          .withFaceLandmarks()
+          .withFaceDescriptor();
+
+        if (detection && faceMatcher) {
+          const bestMatch = faceMatcher.findBestMatch(detection.descriptor);
+          
+          if (bestMatch.label !== 'unknown') {
+            const parts = bestMatch.label.split('|');
+            const idAnggota = parts[0];
+            const namaAnggota = parts[1];
+
+            document.getElementById('detected-name-banner').innerText = `Terdeteksi: ${namaAnggota}`;
+
+            // Cegah pengiriman berulang untuk orang yang sama dalam 30 detik
+            const now = new Date().getTime();
+            if (!lastAbsenTime[idAnggota] || (now - lastAbsenTime[idAnggota] > 30000)) {
+              lastAbsenTime[idAnggota] = now;
+              kirimAbsenKeServer(idAnggota, namaAnggota, tgl);
+            }
+          } else {
+            document.getElementById('detected-name-banner').innerText = 'Wajah tidak dikenali';
+          }
+        } else {
+          document.getElementById('detected-name-banner').innerText = 'Menunggu Wajah Terdeteksi...';
+        }
+      }, 1000);
+    }
+
+    async function kirimAbsenKeServer(id, nama, tanggal) {
+      const payload = {
+        action: 'absenWajah',
+        id_anggota: id,
+        nama: nama,
+        tanggal: tanggal
+      };
+
+      try {
+        await fetch(SCRIPT_URL, {
+          method: 'POST',
+          mode: 'no-cors',
+          body: JSON.stringify(payload)
+        });
+        console.log(`Absen berhasil dicatat untuk: ${nama}`);
+      } catch (err) {
+        console.error("Gagal mengirim absen:", err);
+      }
     }
 
     function tutupSesiAbsen() {
