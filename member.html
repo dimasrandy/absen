@@ -4,124 +4,245 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Ijin Pengajian (Anggota)</title>
-  <!-- Masukkan script face-api.js -->
-  <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js"></script>
+
+  <!-- Load library face-api.js dari folder lokal GitHub -->
+  <script src="face-api.min.js"></script>
+
   <style>
-    body { font-family: sans-serif; padding: 20px; }
-    input, textarea, button { width: 100%; padding: 10px; margin-bottom: 15px; box-sizing: border-box; }
-    .btn-scan { background: #17a2b8; color: white; border: none; border-radius: 5px; }
-    .btn-submit { background: #28a745; color: white; border: none; border-radius: 5px; font-weight: bold; }
-    #videoMember { width: 100%; max-width: 300px; border-radius: 10px; display: none; margin: 0 auto 15px auto; }
+    body { font-family: sans-serif; padding: 20px; max-width: 600px; margin: auto; background: #f9f9f9; }
+    .card { background: #fff; padding: 20px; border-radius: 8px; border: 1px solid #ddd; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+    h2 { margin-top: 0; color: #333; text-align: center; }
+    label { font-weight: bold; display: block; margin-top: 15px; margin-bottom: 5px; }
+    input, select, textarea, button { width: 100%; padding: 12px; margin-bottom: 15px; box-sizing: border-box; font-size: 16px; border-radius: 5px; border: 1px solid #ccc; }
+    .btn-scan { background: #17a2b8; color: white; border: none; font-weight: bold; cursor: pointer; }
+    .btn-scan:hover { background: #138496; }
+    .btn-submit { background: #28a745; color: white; border: none; font-weight: bold; cursor: pointer; font-size: 18px; }
+    .btn-submit:hover { background: #218838; }
+    #videoMember { width: 100%; max-width: 320px; border-radius: 10px; display: none; margin: 10px auto; border: 3px solid #17a2b8; }
+    #statusScan { font-weight: bold; text-align: center; margin-bottom: 15px; }
   </style>
 </head>
 <body>
-  <h2>Formulir Ijin Tidak Hadir</h2>
 
-  <button type="button" class="btn-scan" onclick="bukaKameraIjin()">📷 Isi Nama Otomatis (Scan Wajah)</button>
-  
-  <div style="text-align: center;">
-    <video id="videoMember" autoplay muted playsinline></video>
-    <p id="statusScan" style="color: blue; font-weight: bold;"></p>
+  <div class="card">
+    <h2>Formulir Ijin Tidak Hadir</h2>
+
+    <button type="button" class="btn-scan" onclick="bukaKameraIjin()">📷 Isi Nama Otomatis (Scan Wajah)</button>
+    
+    <div style="text-align: center;">
+      <video id="videoMember" autoplay muted playsinline></video>
+      <div id="statusScan" style="color: #007bff;"></div>
+    </div>
+
+    <form id="formIjin">
+      <label>Tanggal Ijin:</label>
+      <input type="date" id="tglIjin" required>
+
+      <!-- ID Anggota disembunyikan & terisi otomatis di latar belakang -->
+      <input type="hidden" id="idAnggota">
+
+      <label>Nama:</label>
+      <select id="namaAnggota" onchange="onSelectNama()" required>
+        <option value="">-- Memuat Daftar Nama dari Spreadsheet... --</option>
+      </select>
+
+      <label>Alasan Ijin:</label>
+      <textarea id="alasanIjin" rows="3" placeholder="Sakit, acara keluarga, dll..." required></textarea>
+
+      <button type="submit" class="btn-submit">Kirim Ijin Pengajian</button>
+    </form>
   </div>
 
-  <form id="formIjin">
-    <label>Tanggal Ijin:</label>
-    <input type="date" id="tglIjin" required>
-
-    <label>ID Anggota:</label>
-    <input type="text" id="idAnggota" placeholder="Ketik manual atau gunakan scan wajah..." required>
-
-    <label>Nama Lengkap:</label>
-    <input type="text" id="namaAnggota" placeholder="Ketik manual atau gunakan scan wajah..." required>
-
-    <label>Alasan Ijin:</label>
-    <textarea id="alasanIjin" rows="3" placeholder="Sakit, acara keluarga, dll..." required></textarea>
-
-    <button type="submit" class="btn-submit">Kirim Ijin Pengajian</button>
-  </form>
-
   <script>
-    const SCRIPT_URL = 'MASUKKAN_URL_WEB_APP_ANDA_DISINI';
-    let faceMatcher;
+    const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzJmST72zhny9FSNnq66O_W8eNC7WHsJJMaDQpnGJ4z1SJRR8-5qwliT1FD5e0RoID_AQ/exec';
+    
+    let faceMatcher = null;
+    let memberList = [];
+    let memberStream = null;
+    let scanInterval = null;
 
-    // 1. Muat model face-api saat halaman dibuka (dari folder /models di github)
-    async function loadModels() {
-      await faceapi.nets.ssdMobilenetv1.loadFromUri('./models');
-      await faceapi.nets.faceLandmark68Net.loadFromUri('./models');
-      await faceapi.nets.faceRecognitionNet.loadFromUri('./models');
-      
-      const res = await fetch(SCRIPT_URL + '?action=getDescriptors');
-      const members = await res.json();
-      const labeledDescriptors = members.map(m => {
-        return new faceapi.LabeledFaceDescriptors(m.nama + '||' + m.id, [new Float32Array(Object.values(m.descriptor))]);
-      });
-      faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.5);
+    // Set tanggal default hari ini
+    document.getElementById('tglIjin').valueAsDate = new Date();
+
+    // 1. Ambil Data Nama dari Spreadsheet & Muat Model AI saat Halaman Dibuka
+    async function initPage() {
+      // Fetch nama-nama dari Spreadsheet untuk Dropdown
+      try {
+        const res = await fetch(SCRIPT_URL + '?action=getAnggota');
+        memberList = await res.json();
+        
+        const selectNama = document.getElementById('namaAnggota');
+        selectNama.innerHTML = '<option value="">-- Pilih Nama Anda --</option>';
+        
+        if (Array.isArray(memberList) && memberList.length > 0) {
+          memberList.forEach(m => {
+            const opt = document.createElement('option');
+            opt.value = m.nama;
+            opt.dataset.id = m.id;
+            opt.textContent = `${m.nama}`;
+            selectNama.appendChild(opt);
+          });
+        } else {
+          selectNama.innerHTML = '<option value="">-- Belum Ada Anggota Terdaftar --</option>';
+        }
+      } catch (err) {
+        console.error("Gagal mengambil data anggota:", err);
+        document.getElementById('namaAnggota').innerHTML = '<option value="">-- Gagal Memuat Nama --</option>';
+      }
+
+      // Muat Model AI Wajah
+      try {
+        await faceapi.nets.ssdMobilenetv1.loadFromUri('./models');
+        await faceapi.nets.faceLandmark68Net.loadFromUri('./models');
+        await faceapi.nets.faceRecognitionNet.loadFromUri('./models');
+
+        const resDesc = await fetch(SCRIPT_URL + '?action=getDescriptors');
+        const membersWithDesc = await resDesc.json();
+
+        if (Array.isArray(membersWithDesc) && membersWithDesc.length > 0) {
+          const labeledDescriptors = [];
+          membersWithDesc.forEach(m => {
+            if (m.descriptor && Array.isArray(m.descriptor) && m.descriptor.length === 128) {
+              const floatDesc = new Float32Array(m.descriptor);
+              labeledDescriptors.push(
+                new faceapi.LabeledFaceDescriptors(String(m.id) + "|" + String(m.nama), [floatDesc])
+              );
+            }
+          });
+          if (labeledDescriptors.length > 0) {
+            faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.42);
+          }
+        }
+      } catch (err) {
+        console.error("Gagal memuat AI Scan Wajah:", err);
+      }
     }
-    loadModels();
+
+    window.addEventListener('DOMContentLoaded', initPage);
+
+    // Otomatis set ID ketika nama dipilih manual dari dropdown
+    function onSelectNama() {
+      const selectNama = document.getElementById('namaAnggota');
+      const selectedOpt = selectNama.options[selectNama.selectedIndex];
+      if (selectedOpt && selectedOpt.dataset.id) {
+        document.getElementById('idAnggota').value = selectedOpt.dataset.id;
+      } else {
+        document.getElementById('idAnggota').value = '';
+      }
+    }
 
     // 2. Fungsi Tombol Scan Wajah
     async function bukaKameraIjin() {
-      if(!faceMatcher) { alert("Model AI masih memuat, tunggu sebentar..."); return; }
-      
+      if (!faceMatcher) {
+        alert("Model AI atau database wajah sedang memuat, harap tunggu sebentar...");
+        return;
+      }
+
       const video = document.getElementById('videoMember');
+      const statusText = document.getElementById('statusScan');
+      
       video.style.display = 'block';
-      document.getElementById('statusScan').innerText = 'Menunggu kamera & mencari wajah...';
-      
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
-      video.srcObject = stream;
-      
-      const scanInterval = setInterval(async () => {
-        const detection = await faceapi.detectSingleFace(video).withFaceLandmarks().withFaceDescriptor();
-        
-        if (detection) {
-          const match = faceMatcher.findBestMatch(detection.descriptor);
-          if (match.label !== 'unknown') {
-            const [nama, id] = match.label.split('||');
-            
-            // Isi form otomatis
-            document.getElementById('idAnggota').value = id;
-            document.getElementById('namaAnggota').value = nama;
-            document.getElementById('statusScan').innerText = `✅ Wajah dikenali: ${nama}`;
-            
-            // Matikan kamera
-            clearInterval(scanInterval);
-            stream.getTracks().forEach(track => track.stop());
-            video.style.display = 'none';
+      statusText.innerText = 'Posisikan wajah Anda di depan kamera...';
+      statusText.style.color = '#007bff';
+
+      try {
+        memberStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user' }, audio: false
+        });
+        video.srcObject = memberStream;
+        await video.play();
+
+        if (scanInterval) clearInterval(scanInterval);
+
+        scanInterval = setInterval(async () => {
+          const detection = await faceapi.detectSingleFace(video, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 }))
+            .withFaceLandmarks()
+            .withFaceDescriptor();
+
+          if (detection) {
+            const match = faceMatcher.findBestMatch(detection.descriptor);
+            if (match.label !== 'unknown') {
+              const parts = match.label.split('|');
+              const id = parts[0];
+              const nama = parts.slice(1).join('|');
+
+              // Auto Pilih Nama pada Dropdown & ID Hidden
+              const selectNama = document.getElementById('namaAnggota');
+              selectNama.value = nama;
+              document.getElementById('idAnggota').value = id;
+
+              statusText.innerText = `✅ Wajah Dikenali: ${nama}`;
+              statusText.style.color = '#28a745';
+
+              // Matikan Kamera Otomatis
+              stopCamera();
+            } else {
+              statusText.innerText = '❌ Wajah tidak dikenali, coba atur pencahayaan.';
+              statusText.style.color = '#dc3545';
+            }
           }
-        }
-      }, 1000); // Scan tiap 1 detik
+        }, 1000);
+
+      } catch (err) {
+        alert("Gagal membuka kamera. Pastikan izin kamera telah diberikan.");
+        video.style.display = 'none';
+        statusText.innerText = '';
+      }
+    }
+
+    function stopCamera() {
+      if (scanInterval) { clearInterval(scanInterval); scanInterval = null; }
+      if (memberStream) {
+        memberStream.getTracks().forEach(track => track.stop());
+        memberStream = null;
+      }
+      document.getElementById('videoMember').style.display = 'none';
     }
 
     // 3. Proses Submit Form ke Spreadsheet
     document.getElementById('formIjin').addEventListener('submit', async (e) => {
       e.preventDefault();
+
+      const namaVal = document.getElementById('namaAnggota').value;
+      const idVal = document.getElementById('idAnggota').value;
       
-      // Ubah format tanggal YYYY-MM-DD ke DD/MM/YYYY agar seragam di spreadsheet
+      if (!namaVal) {
+        alert('Harap pilih Nama terlebih dahulu!');
+        return;
+      }
+
       const rawDate = document.getElementById('tglIjin').value.split('-');
       const formattedDate = `${rawDate[2]}/${rawDate[1]}/${rawDate[0]}`;
-      
+
       const data = {
         action: 'submitIjin',
-        tanggal: formattedDate, 
-        id_anggota: document.getElementById('idAnggota').value,
-        nama: document.getElementById('namaAnggota').value,
+        tanggal: formattedDate,
+        id_anggota: idVal || '-',
+        nama: namaVal,
         alasan: document.getElementById('alasanIjin').value
       };
-      
+
       const submitBtn = document.querySelector('.btn-submit');
       submitBtn.innerText = 'Mengirim ke Server...';
       submitBtn.disabled = true;
-      
-      await fetch(SCRIPT_URL, {
-        method: 'POST',
-        body: JSON.stringify(data)
-      });
-      
-      alert('Ijin berhasil dikirim!');
-      document.getElementById('formIjin').reset();
-      document.getElementById('statusScan').innerText = '';
-      submitBtn.innerText = 'Kirim Ijin Pengajian';
-      submitBtn.disabled = false;
+
+      try {
+        await fetch(SCRIPT_URL, {
+          method: 'POST',
+          mode: 'no-cors',
+          body: JSON.stringify(data)
+        });
+
+        alert('Ijin berhasil dikirim!');
+        document.getElementById('formIjin').reset();
+        document.getElementById('tglIjin').valueAsDate = new Date();
+        document.getElementById('statusScan').innerText = '';
+      } catch (err) {
+        alert('Gagal mengirim ijin, periksa koneksi internet.');
+      } finally {
+        submitBtn.innerText = 'Kirim Ijin Pengajian';
+        submitBtn.disabled = false;
+      }
     });
   </script>
 </body>
