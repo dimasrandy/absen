@@ -149,9 +149,6 @@
       <option value="user">Kamera Depan</option>
       <option value="environment">Kamera Belakang</option>
     </select>
-
-    <label>ID Anggota:</label>
-    <input type="text" id="regId" placeholder="Contoh: 001">
     
     <label>Nama Lengkap:</label>
     <input type="text" id="regName" placeholder="Masukkan nama lengkap...">
@@ -189,7 +186,7 @@
   </div>
 
   <script>
-    const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzJmST72zhny9FSNnq66O_W8eNC7WHsJJMaDQpnGJ4z1SJRR8-5qwliT1FD5e0RoID_AQ/exec';
+    const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxWeN3C5_A1gNJWj60mr0pBL3sw1EO6-vZ1MnxYgg-NCjjDtxgb77NvsQt7fZPaS1Egrw/exec';
 
     const videoAbsen = document.getElementById('video-absen');
     const videoReg = document.getElementById('video-reg');
@@ -540,16 +537,15 @@
     }
 
     async function daftarAnggota() {
-      const idAnggota = document.getElementById('regId').value.trim();
       const namaAnggota = document.getElementById('regName').value.trim();
       const statusText = document.getElementById('reg-status');
 
-      if (!idAnggota || !namaAnggota) { alert('Harap isi ID dan Nama Anggota!'); return; }
+      if (!namaAnggota) { alert('Harap isi Nama Lengkap Anggota!'); return; }
       if (!isModelLoaded) { alert('Model AI belum dimuat.'); return; }
 
       statusText.innerHTML = '<i>Sedang memindai wajah...</i>';
       try {
-        const detection = await faceapi.detectSingleFace(videoReg, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 })).withFaceLandmarks().withFaceDescriptor();
+        const detection = await faceapi.detectSingleFace(videoReg, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.65 })).withFaceLandmarks().withFaceDescriptor();
         if (!detection) {
           statusText.innerHTML = '<b style="color:red;">Wajah tidak terdeteksi!</b>'; return;
         }
@@ -557,10 +553,18 @@
         const descriptorArray = Array.from(detection.descriptor);
         statusText.innerHTML = '<i>Menyimpan ke Spreadsheet...</i>';
 
-        await fetch(SCRIPT_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ action: 'tambahAnggota', id: idAnggota, nama: namaAnggota, descriptor: descriptorArray }) });
+        await fetch(SCRIPT_URL, { 
+          method: 'POST', 
+          mode: 'no-cors', 
+          body: JSON.stringify({ 
+            action: 'tambahAnggota', 
+            nama: namaAnggota, 
+            descriptor: descriptorArray 
+          }) 
+        });
 
         statusText.innerHTML = '<b style="color:green;">Berhasil Disimpan.</b>';
-        document.getElementById('regId').value = ''; document.getElementById('regName').value = '';
+        document.getElementById('regName').value = '';
       } catch (error) { statusText.innerHTML = '<b style="color:red;">Gagal menyimpan.</b>'; }
     }
 
@@ -627,7 +631,6 @@
               };
             }
             
-            // Menggunakan Set agar tanggal yang sama hanya terhitung 1 hari
             if (status === 'Hadir') {
               rekap[id].setHadir.add(tglStr);
             }
