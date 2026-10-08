@@ -20,7 +20,6 @@
     th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
     th { background-color: #f2f2f2; }
     
-    /* Fullscreen Camera View for Attendance */
     #absen-scanner-view {
       display: none;
       position: fixed;
@@ -32,7 +31,6 @@
       justify-content: center;
     }
     
-    /* Responsive Video Styling */
     .video-container {
       position: relative;
       width: 100%;
@@ -95,6 +93,14 @@
       border-radius: 5px;
       cursor: pointer;
     }
+    .btn-delete {
+      background: #dc3545;
+      color: white;
+      border: none;
+      padding: 6px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
@@ -123,10 +129,14 @@
     <button class="menu-btn" style="background:#6c757d;" onclick="backToMenu()">Kembali ke Menu</button>
   </div>
 
-  <!-- Halaman 2: Ubah Data Anggota -->
+  <!-- Halaman 2: Ubah / Hapus Data Anggota -->
   <div id="ubah" class="section">
-    <h3>Ubah Data Anggota</h3>
-    <p><i>Fitur sedang disiapkan...</i></p>
+    <h3>Ubah / Hapus Data Anggota</h3>
+    <label>Cari Nama Anggota:</label>
+    <input type="text" id="searchAnggotaInput" oninput="filterAnggota()" placeholder="Ketik nama anggota...">
+    
+    <div id="listAnggotaContainer"><i>Memuat data anggota...</i></div>
+    <br>
     <button class="menu-btn" style="background:#6c757d;" onclick="backToMenu()">Kembali ke Menu</button>
   </div>
 
@@ -159,7 +169,7 @@
   <!-- Halaman 4: Rekap Absen -->
   <div id="rekap" class="section">
     <h3>Peringkat Kehadiran Anggota</h3>
-    <p>Sortir berdasarkan Tanggal:</p>
+    <p>Sortir berdasarkan Tanggal (Opsional):</p>
     Dari: <input type="date" id="startDate"><br><br>
     Sampai: <input type="date" id="endDate"><br><br>
     <button onclick="loadRekap()" style="padding:10px; background:#28a745; color:white; border:none; cursor:pointer; width:100%;">Tampilkan Data</button>
@@ -188,15 +198,14 @@
     let absenStream = null;
     let faceMatcher = null;
     let lastAbsenTime = {};
+    let allAnggotaList = [];
     
-    // Variabel state untuk kamera absensi
     let scanningAbsen = false;
     let detectionRunning = false;
     let lastDetectionTime = 0;
 
     document.getElementById('absensiTanggal').valueAsDate = new Date();
 
-    // STATE HISTORY (Mencegah Keluar Aplikasi saat di Usap Back)
     history.replaceState({ page: 'menu' }, "", "");
     window.addEventListener('popstate', function(event) {
       stopAllStreams();
@@ -232,8 +241,13 @@
       if (targetSection) {
         targetSection.classList.add('active');
       }
+
       if (id === 'tambah' && isModelLoaded) {
         startRegCamera();
+      } else if (id === 'ubah') {
+        loadAnggotaList();
+      } else if (id === 'rekap') {
+        loadRekap();
       }
     }
 
@@ -258,6 +272,72 @@
       videoReg.srcObject = null;
     }
 
+    // --- FITUR UBAH / HAPUS ANGGOTA (MENU 2) ---
+    async function loadAnggotaList() {
+      const container = document.getElementById('listAnggotaContainer');
+      container.innerHTML = '<i>Memuat data dari Spreadsheet...</i>';
+      try {
+        const res = await fetch(SCRIPT_URL + '?action=getAnggota');
+        allAnggotaList = await res.json();
+        renderAnggotaTable(allAnggotaList);
+      } catch (err) {
+        container.innerHTML = '<b style="color:red;">Gagal memuat data anggota.</b>';
+      }
+    }
+
+    function renderAnggotaTable(data) {
+      const container = document.getElementById('listAnggotaContainer');
+      if (!data || data.length === 0) {
+        container.innerHTML = '<p>Tidak ada data anggota.</p>';
+        return;
+      }
+
+      let html = `<table>
+                    <tr>
+                      <th>ID Anggota</th>
+                      <th>Nama Lengkap</th>
+                      <th>Aksi</th>
+                    </tr>`;
+      
+      data.forEach(item => {
+        html += `<tr>
+                  <td><b>${item.id}</b></td>
+                  <td>${item.nama}</td>
+                  <td>
+                    <button class="btn-delete" onclick="konfirmasiHapus('${item.id}', '${item.nama}')">Hapus</button>
+                  </td>
+                </tr>`;
+      });
+      html += `</table>`;
+      container.innerHTML = html;
+    }
+
+    function filterAnggota() {
+      const query = document.getElementById('searchAnggotaInput').value.toLowerCase();
+      const filtered = allAnggotaList.filter(item => item.nama.toLowerCase().includes(query));
+      renderAnggotaTable(filtered);
+    }
+
+    async function konfirmasiHapus(id, nama) {
+      if (confirm(`Apakah Anda yakin ingin menghapus anggota:\n\nNama: ${nama}\nID: ${id}\n\nData yang dihapus tidak dapat dikembalikan!`)) {
+        const container = document.getElementById('listAnggotaContainer');
+        container.innerHTML = `<i>Menghapus ${nama}...</i>`;
+        try {
+          await fetch(SCRIPT_URL, {
+            method: 'POST',
+            mode: 'no-cors',
+            body: JSON.stringify({ action: 'hapusAnggota', id: id })
+          });
+          alert(`Anggota ${nama} telah berhasil dihapus.`);
+          loadAnggotaList();
+        } catch (err) {
+          alert('Gagal menghapus anggota.');
+          loadAnggotaList();
+        }
+      }
+    }
+
+    // --- KAMERA PENDAFTARAN & ABSENSI ---
     async function startRegCamera() {
       if (regStream) regStream.getTracks().forEach(track => track.stop());
       const facing = document.getElementById('cameraFacing').value;
@@ -276,88 +356,55 @@
 
     async function startAbsenCamera() {
       try {
-        console.log("Memulai kamera absensi...");
         if (absenStream) {
           absenStream.getTracks().forEach(track => track.stop());
           absenStream = null;
         }
 
         absenStream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: { ideal: "user" },
-            width: { ideal: 640 },
-            height: { ideal: 480 }
-          },
+          video: { facingMode: { ideal: "user" }, width: { ideal: 640 }, height: { ideal: 480 } },
           audio: false
         });
 
-        console.log("Kamera berhasil didapatkan.");
         videoAbsen.srcObject = absenStream;
         videoAbsen.muted = true;
         videoAbsen.playsInline = true;
-
         await videoAbsen.play();
-        console.log("Video kamera berjalan.");
       } catch (err) {
-        console.error("ERROR KAMERA:", err);
         document.getElementById('detected-name-banner').innerText = "Kamera gagal dibuka: " + err.message;
       }
     }
 
-    // Memuat database wajah anggota
     async function loadFaceDatabase() {
       try {
-        console.log("Memuat database wajah...");
         const res = await fetch(SCRIPT_URL + '?action=getDescriptors');
-
-        if (!res.ok) {
-          throw new Error("HTTP Error: " + res.status);
-        }
+        if (!res.ok) throw new Error("HTTP Error: " + res.status);
 
         const members = await res.json();
-        console.log("Jumlah anggota:", members.length);
-
         if (!Array.isArray(members) || members.length === 0) {
-          console.warn("Database anggota kosong.");
-          faceMatcher = null;
-          return false;
+          faceMatcher = null; return false;
         }
 
         const labeledDescriptors = [];
         members.forEach(m => {
           try {
-            if (!m.descriptor || !Array.isArray(m.descriptor)) {
-              console.warn("Descriptor kosong:", m.nama); return;
+            if (m.descriptor && Array.isArray(m.descriptor) && m.descriptor.length === 128) {
+              const floatDesc = new Float32Array(m.descriptor);
+              labeledDescriptors.push(
+                new faceapi.LabeledFaceDescriptors(String(m.id) + "|" + String(m.nama), [floatDesc])
+              );
             }
-            if (m.descriptor.length !== 128) {
-              console.warn("Descriptor tidak valid:", m.nama, "Jumlah:", m.descriptor.length); return;
-            }
-
-            const floatDesc = new Float32Array(m.descriptor);
-            labeledDescriptors.push(
-              new faceapi.LabeledFaceDescriptors(String(m.id) + "|" + String(m.nama), [floatDesc])
-            );
-            console.log("Wajah siap:", m.id, m.nama, "descriptor:", m.descriptor.length);
-          } catch (err) {
-            console.error("Gagal memproses:", m.nama, err);
-          }
+          } catch (err) {}
         });
 
         if (labeledDescriptors.length === 0) {
-          console.error("Tidak ada descriptor wajah yang valid.");
-          faceMatcher = null;
-          return false;
+          faceMatcher = null; return false;
         }
 
-        // Toleransi FaceMatcher di 0.60
         faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.60);
-        console.log("FaceMatcher siap. Jumlah wajah:", labeledDescriptors.length);
-
         return true;
       } catch (err) {
-        console.error("Gagal memuat database wajah:", err);
-        faceMatcher = null;
-        return false;
+        faceMatcher = null; return false;
       }
     }
 
@@ -375,7 +422,7 @@
 
       const loaded = await loadFaceDatabase();
       if (!loaded) {
-        banner.innerText = 'Database kosong atau gagal memuat.';
+        banner.innerText = 'Database kosong atau belum ada anggota terdaftar.';
         banner.style.background = 'rgba(220, 53, 69, 0.9)';
         return;
       }
@@ -384,10 +431,7 @@
       await startAbsenCamera();
     }
 
-    // EVENT SAAT VIDEO ABSENSI MULAI BERMAIN (Memicu scan wajah terus menerus)
     videoAbsen.addEventListener('play', async () => {
-      console.log("VIDEO ABSEN PLAY");
-
       const oldCanvas = document.getElementById('absen-canvas');
       if (oldCanvas) oldCanvas.remove();
 
@@ -398,12 +442,9 @@
       }
 
       if (videoAbsen.videoWidth === 0 || videoAbsen.videoHeight === 0) {
-        console.error("Ukuran video tidak tersedia.");
         document.getElementById('detected-name-banner').innerText = "Kamera aktif tetapi ukuran video tidak terbaca.";
         return;
       }
-
-      console.log("Ukuran kamera:", videoAbsen.videoWidth, "x", videoAbsen.videoHeight);
 
       const canvas = faceapi.createCanvasFromMedia(videoAbsen);
       canvas.id = 'absen-canvas';
@@ -413,12 +454,9 @@
       faceapi.matchDimensions(canvas, displaySize);
 
       scanningAbsen = true;
-      console.log("Face scanning DIMULAI");
-
       scanFaceAbsen(displaySize, canvas);
     });
 
-    // FUNGSI UTAMA SCAN WAJAH (Animasi Loop)
     async function scanFaceAbsen(displaySize, canvas) {
       if (!scanningAbsen) return;
 
@@ -442,14 +480,11 @@
         const banner = document.getElementById('detected-name-banner');
 
         if (detection) {
-          console.log("WAJAH TERDETEKSI", detection.detection.score);
-
           const resizedDetection = faceapi.resizeResults(detection, displaySize);
           faceapi.draw.drawDetections(canvas, resizedDetection);
 
           if (faceMatcher) {
             const bestMatch = faceMatcher.findBestMatch(detection.descriptor);
-            console.log("Hasil pencocokan:", bestMatch.label, "distance:", bestMatch.distance);
 
             if (bestMatch.label !== 'unknown') {
               const parts = bestMatch.label.split('|');
@@ -464,8 +499,6 @@
                 lastAbsenTime[idAnggota] = currentTime;
                 const tgl = document.getElementById('absensiTanggal').value;
                 const ket = document.getElementById('absensiKeterangan').value;
-
-                console.log("MENGIRIM ABSENSI:", idAnggota, namaAnggota);
                 kirimAbsenKeServer(idAnggota, namaAnggota, tgl, ket);
               }
             } else {
@@ -481,8 +514,7 @@
           banner.style.background = 'rgba(0, 123, 255, 0.9)';
         }
       } catch (error) {
-        console.error("ERROR DETEKSI WAJAH:", error);
-        document.getElementById('detected-name-banner').innerText = 'Error deteksi wajah. Lihat Console.';
+        document.getElementById('detected-name-banner').innerText = 'Error deteksi wajah.';
       } finally {
         detectionRunning = false;
       }
@@ -507,7 +539,6 @@
       } catch (err) {}
     }
 
-    // Fungsi Pendaftaran
     async function daftarAnggota() {
       const idAnggota = document.getElementById('regId').value.trim();
       const namaAnggota = document.getElementById('regName').value.trim();
@@ -533,34 +564,100 @@
       } catch (error) { statusText.innerHTML = '<b style="color:red;">Gagal menyimpan.</b>'; }
     }
 
-    // Rekap Absen
+    // --- REKAP & PERINGKAT ABSEN (MENU 4) ---
+    function parseTanggalSafe(tglStr) {
+      if (!tglStr) return null;
+      if (typeof tglStr !== 'string') tglStr = String(tglStr);
+      let parts;
+      if (tglStr.includes('/')) {
+        parts = tglStr.split('/');
+        if (parts.length === 3) return new Date(parts[2], parts[1] - 1, parts[0]);
+      } else if (tglStr.includes('-')) {
+        parts = tglStr.split('-');
+        if (parts.length === 3) return new Date(parts[0], parts[1] - 1, parts[2]);
+      }
+      let d = new Date(tglStr);
+      return isNaN(d.getTime()) ? null : d;
+    }
+
     async function loadRekap() {
-      document.getElementById('hasilRekap').innerHTML = '<i>Sedang memuat...</i>';
+      const container = document.getElementById('hasilRekap');
+      container.innerHTML = '<i>Sedang memuat data dari Spreadsheet...</i>';
+      
       const startInput = document.getElementById('startDate').value;
       const endInput = document.getElementById('endDate').value;
-      const start = new Date(startInput); const end = new Date(endInput);
+      const start = startInput ? new Date(startInput) : null;
+      const end = endInput ? new Date(endInput) : null;
       
-      const res = await fetch(SCRIPT_URL + '?action=getRekap');
-      const data = await res.json();
-      
-      let rekap = {}; 
-      data.slice(1).forEach(row => {
-        const tglStr = row[0].split('/'); 
-        const tglRow = new Date(tglStr[2], tglStr[1] - 1, tglStr[0]); 
-        if (tglRow >= start && tglRow <= end) {
-          const id = row[2]; const nama = row[3]; const status = row[4]; const alasan = row[5];
-          if (!rekap[id]) rekap[id] = { nama: nama, hadir: 0, ijin: 0, catatanIjin: [] };
-          if (status === 'Hadir') rekap[id].hadir++;
-          if (status === 'Ijin') { rekap[id].ijin++; rekap[id].catatanIjin.push(`${row[0]}: ${alasan}`); }
+      try {
+        const res = await fetch(SCRIPT_URL + '?action=getRekap');
+        const data = await res.json();
+        
+        if (!data || data.length <= 1) {
+          container.innerHTML = '<p>Belum ada data kehadiran yang tercatat.</p>';
+          return;
         }
-      });
-      
-      let sortedRekap = Object.values(rekap).sort((a, b) => a.hadir - b.hadir);
-      let html = `<table><tr><th>Peringkat (Jarang Hadir)</th><th>Nama</th><th>Total Hadir</th><th>Total Ijin</th><th>Alasan Ijin</th></tr>`;
-      sortedRekap.forEach((item, index) => {
-        html += `<tr><td>#${index + 1}</td><td><b>${item.nama}</b></td><td>${item.hadir} Hari</td><td>${item.ijin} Hari</td><td style="font-size:12px;">${item.catatanIjin.join('<br>')}</td></tr>`;
-      });
-      document.getElementById('hasilRekap').innerHTML = html + `</table>`;
+
+        const records = data.slice(1);
+        let rekap = {}; 
+        
+        records.forEach(row => {
+          if (!row[0] || !row[2]) return;
+          const tglRow = parseTanggalSafe(row[0]);
+          
+          let matchesFilter = true;
+          if (tglRow) {
+            if (start && tglRow < start) matchesFilter = false;
+            if (end && tglRow > end) matchesFilter = false;
+          }
+          
+          if (matchesFilter) {
+            const id = String(row[2]);
+            const nama = String(row[3] || 'Tanpa Nama');
+            const status = String(row[4] || 'Hadir');
+            const alasan = String(row[5] || '-');
+            
+            if (!rekap[id]) rekap[id] = { nama: nama, hadir: 0, ijin: 0, catatanIjin: [] };
+            
+            if (status === 'Hadir') rekap[id].hadir++;
+            if (status === 'Ijin') {
+              rekap[id].ijin++;
+              rekap[id].catatanIjin.push(`${row[0]}: ${alasan}`);
+            }
+          }
+        });
+        
+        let sortedRekap = Object.values(rekap).sort((a, b) => a.hadir - b.hadir);
+        
+        if (sortedRekap.length === 0) {
+          container.innerHTML = '<p>Data tidak ditemukan pada rentang tanggal tersebut.</p>';
+          return;
+        }
+
+        let html = `<table>
+                      <tr>
+                        <th>Peringkat (Jarang Hadir)</th>
+                        <th>Nama</th>
+                        <th>Total Hadir</th>
+                        <th>Total Ijin</th>
+                        <th>Alasan / Kegiatan</th>
+                      </tr>`;
+                      
+        sortedRekap.forEach((item, index) => {
+          html += `<tr>
+            <td>#${index + 1}</td>
+            <td><b>${item.nama}</b></td>
+            <td>${item.hadir} Hari</td>
+            <td>${item.ijin} Hari</td>
+            <td style="font-size:12px;">${item.catatanIjin.join('<br>') || '-'}</td>
+          </tr>`;
+        });
+        html += `</table>`;
+        
+        container.innerHTML = html;
+      } catch (err) {
+        container.innerHTML = '<b style="color:red;">Gagal memuat rekap kehadiran.</b>';
+      }
     }
   </script>
 </body>
