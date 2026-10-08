@@ -189,7 +189,7 @@
   </div>
 
   <script>
-    const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwBMjMP0fXaejwfplELxG4d0bNxlpBj_mQlwdDrOlMNTNetarn1Wd0Z6mM5OaEVJ0AQ/exec';
+    const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzJmST72zhny9FSNnq66O_W8eNC7WHsJJMaDQpnGJ4z1SJRR8-5qwliT1FD5e0RoID_AQ/exec';
 
     const videoAbsen = document.getElementById('video-absen');
     const videoReg = document.getElementById('video-reg');
@@ -272,7 +272,7 @@
       videoReg.srcObject = null;
     }
 
-    // --- FITUR UBAH / HAPUS ANGGOTA (MENU 2) ---
+    // --- UBAH / HAPUS ANGGOTA (MENU 2) ---
     async function loadAnggotaList() {
       const container = document.getElementById('listAnggotaContainer');
       container.innerHTML = '<i>Memuat data dari Spreadsheet...</i>';
@@ -564,7 +564,7 @@
       } catch (error) { statusText.innerHTML = '<b style="color:red;">Gagal menyimpan.</b>'; }
     }
 
-    // --- REKAP & PERINGKAT ABSEN (MENU 4) ---
+    // --- LOGIKA REKAP DENGAN DEDUPLIKASI TANGGAL UNIK (MENU 4) ---
     function parseTanggalSafe(tglStr) {
       if (!tglStr) return null;
       if (typeof tglStr !== 'string') tglStr = String(tglStr);
@@ -603,7 +603,8 @@
         
         records.forEach(row => {
           if (!row[0] || !row[2]) return;
-          const tglRow = parseTanggalSafe(row[0]);
+          const tglStr = String(row[0]).trim();
+          const tglRow = parseTanggalSafe(tglStr);
           
           let matchesFilter = true;
           if (tglRow) {
@@ -612,22 +613,39 @@
           }
           
           if (matchesFilter) {
-            const id = String(row[2]);
-            const nama = String(row[3] || 'Tanpa Nama');
-            const status = String(row[4] || 'Hadir');
-            const alasan = String(row[5] || '-');
+            const id = String(row[2]).trim();
+            const nama = String(row[3] || 'Tanpa Nama').trim();
+            const status = String(row[4] || 'Hadir').trim();
+            const alasan = String(row[5] || '-').trim();
             
-            if (!rekap[id]) rekap[id] = { nama: nama, hadir: 0, ijin: 0, catatanIjin: [] };
+            if (!rekap[id]) {
+              rekap[id] = { 
+                nama: nama, 
+                setHadir: new Set(), 
+                setIjin: new Set(), 
+                catatanIjin: [] 
+              };
+            }
             
-            if (status === 'Hadir') rekap[id].hadir++;
+            // Menggunakan Set agar tanggal yang sama hanya terhitung 1 hari
+            if (status === 'Hadir') {
+              rekap[id].setHadir.add(tglStr);
+            }
             if (status === 'Ijin') {
-              rekap[id].ijin++;
-              rekap[id].catatanIjin.push(`${row[0]}: ${alasan}`);
+              if (!rekap[id].setIjin.has(tglStr)) {
+                rekap[id].setIjin.add(tglStr);
+                rekap[id].catatanIjin.push(`${tglStr}: ${alasan}`);
+              }
             }
           }
         });
         
-        let sortedRekap = Object.values(rekap).sort((a, b) => a.hadir - b.hadir);
+        let sortedRekap = Object.values(rekap).map(item => ({
+          nama: item.nama,
+          hadir: item.setHadir.size,
+          ijin: item.setIjin.size,
+          catatanIjin: item.catatanIjin
+        })).sort((a, b) => a.hadir - b.hadir);
         
         if (sortedRekap.length === 0) {
           container.innerHTML = '<p>Data tidak ditemukan pada rentang tanggal tersebut.</p>';
